@@ -1,4 +1,4 @@
 ## Build
 ```
-fyne package -os windows -icon twimg.png
+fyne package -os windows -icon abema.png
 ```

@@ -216,6 +216,7 @@ func (atv *AbemaTVBasic) Merge() {
 		videoBytes, _ := ioutil.ReadAll(videoFile)
 		fileAll.Write(videoBytes)
 	}
+	defer fileAll.Close()
 	atv.Output = outputVideo
 }
 
