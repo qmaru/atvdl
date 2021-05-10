@@ -14,13 +14,17 @@ import (
 	"time"
 
 	"atvdl/utils"
+
+	"fyne.io/fyne/v2/widget"
 )
 
 var (
-	decFolder = ""
-	decName   = ""
-	s5Proxy   = ""
-	JSConsole = []string{
+	decFolder    = ""
+	decName      = ""
+	UIProgress   *widget.ProgressBar
+	progressStep float64 = 0.0
+	s5Proxy              = ""
+	JSConsole            = []string{
 		"var n = t.data",
 		"Array.from(t.data.iwt, function(byte){return ('0' + (byte & 0xFF).toString(16)).slice(-2);}).join('')",
 	}
@@ -149,6 +153,9 @@ func (atv *AbemaTVBasic) dlcore(u interface{}) interface{} {
 	io.Copy(dst, bytes.NewReader(decData))
 	defer dst.Close()
 
+	files, _ := ioutil.ReadDir(decFolder)
+	UIProgress.SetValue(progressStep * float64(len(files)))
+
 	time.Sleep(time.Second * 3)
 	return nil
 }
@@ -228,6 +235,7 @@ func (atv *AbemaTVBasic) DownloadCore(videos []interface{}, thread int) {
 	decFolder = filepath.Join(utils.FileSuite.LocalPath(true), decName)
 	utils.FileSuite.Create(decFolder)
 	// 下载视频
+	progressStep = 0.8 / float64(len(videos))
 	utils.TaskBoard(atv.dlcore, videos, thread)
 }
 

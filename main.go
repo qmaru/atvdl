@@ -38,7 +38,7 @@ func main() {
 	myApp := app.New()
 	myApp.SetIcon(theme.MyLogo())
 	myWin := myApp.NewWindow("AbemaTV")
-	myWin.Resize(fyne.NewSize(400, 280))
+	myWin.Resize(fyne.NewSize(400, 320))
 	myWin.SetFixedSize(true)
 	myWin.CenterOnScreen()
 
@@ -46,6 +46,7 @@ func main() {
 	uiKey := widget.NewEntry()
 	uiProxy := widget.NewEntry()
 	uiHelp := widget.NewLabel("")
+	services.UIProgress = widget.NewProgressBar()
 
 	uiPlaylist.SetPlaceHolder("Playlist")
 	uiKey.SetPlaceHolder("Key")
@@ -63,6 +64,7 @@ func main() {
 
 		if url != "" && key != "" {
 			uiDownload.DisableableWidget.Disable()
+			services.UIProgress.SetValue(0)
 
 			abema := services.AbemaTV
 
@@ -87,6 +89,7 @@ func main() {
 
 					uiHelp.SetText("[4] Merging...")
 					abema.Merge()
+					services.UIProgress.SetValue(1)
 
 					uiHelp.SetText(abema.Output)
 					uiDownload.DisableableWidget.Enable()
@@ -110,6 +113,7 @@ func main() {
 		uiGetKey,
 		uiKey,
 		uiProxy,
+		services.UIProgress,
 		uiDownload,
 		uiHelp,
 	)
