@@ -48,7 +48,19 @@ func init() {
 }
 
 // IPCheck 检查IP
+func (atv *AbemaTVBasic) URLCheck(url string) bool {
+	urlRule := regexp.MustCompile(`https?://.*abematv.*`)
+	result := urlRule.MatchString(url)
+	return result
+}
+
+// IPCheck 检查IP
 func (atv *AbemaTVBasic) IPCheck(url string) bool {
+	defer func() {
+		if e := recover(); e != nil {
+			return
+		}
+	}()
 	headers := utils.MiniHeaders{
 		"User-Agent": utils.UserAgent,
 	}
@@ -188,6 +200,7 @@ func (atv *AbemaTVBasic) BestM3U8URL() (m3u8URL string) {
 
 // GetVideoInfo 获取视频信息
 func (atv *AbemaTVBasic) GetVideoInfo(m3u8URL string) []interface{} {
+	atv.videos = []interface{}{}
 	// 视频列表的
 	atv.setM3U8Host()
 	m3u8URL = atv.m3u8Host + m3u8URL

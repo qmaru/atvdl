@@ -72,38 +72,47 @@ func main() {
 			nonURL := strings.TrimSuffix(norURL, "\n")
 			clearURL := strings.TrimSpace(nonURL)
 
-			abema.SetProxy(proxy)
-			if len(key) == 32 && abema.IPCheck(clearURL) {
-				abema.PlaylistURL = strings.TrimSpace(clearURL)
-				abema.Key = key
+			if abema.URLCheck(clearURL) {
+				abema.SetProxy(proxy)
+				if len(key) == 32 && abema.IPCheck(clearURL) {
+					abema.PlaylistURL = strings.TrimSpace(clearURL)
+					abema.Key = key
 
-				uiHelp.SetText("[1] Get Best Playlist...")
-				bestURL := abema.BestM3U8URL()
-				if bestURL != "" {
-					uiHelp.SetText("[2] Get Video List...")
-					videos := abema.GetVideoInfo(bestURL)
+					uiHelp.SetText("[1] Get Best Playlist...")
+					bestURL := abema.BestM3U8URL()
+					if bestURL != "" {
+						uiHelp.SetText("[2] Get Video List...")
+						videos := abema.GetVideoInfo(bestURL)
 
-					dlInfo := fmt.Sprintf("[3] Downloading...(%d)", len(videos))
-					uiHelp.SetText(dlInfo)
-					abema.DownloadCore(videos, 8)
+						dlInfo := fmt.Sprintf("[3] Downloading...(%d)", len(videos))
+						uiHelp.SetText(dlInfo)
+						abema.DownloadCore(videos, 8)
 
-					uiHelp.SetText("[4] Merging...")
-					abema.Merge()
-					services.UIProgress.SetValue(1)
+						uiHelp.SetText("[4] Merging...")
+						abema.Merge()
+						services.UIProgress.SetValue(1)
 
-					uiHelp.SetText(abema.Output)
-					uiDownload.DisableableWidget.Enable()
+						uiHelp.SetText(abema.Output)
+						uiDownload.DisableableWidget.Enable()
+					} else {
+						uiDownload.DisableableWidget.Enable()
+						uiHelp.SetText("url error")
+					}
 				} else {
 					uiDownload.DisableableWidget.Enable()
-					uiHelp.SetText("url error")
+					if len(key) != 32 {
+						uiHelp.SetText("Key Error")
+					} else if !abema.IPCheck(clearURL) {
+						uiHelp.SetText("Proxy Error")
+					}
 				}
 			} else {
 				uiDownload.DisableableWidget.Enable()
-				uiHelp.SetText("Please Set Proxy or key error")
+				uiHelp.SetText("Playlist Error")
 			}
 		} else {
 			uiDownload.DisableableWidget.Enable()
-			uiHelp.SetText("url or key is empty")
+			uiHelp.SetText("Playlist or Key is empty")
 		}
 		uiDownload.DisableableWidget.Enable()
 	})
