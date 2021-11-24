@@ -26,7 +26,7 @@ var (
 	s5Proxy              = ""
 	JSConsole            = []string{
 		"var n = t.data",
-		"Array.from(t.data.iwt, function(byte){return ('0' + (byte & 0xFF).toString(16)).slice(-2);}).join('')",
+		"Array.from(t.data.iyt, function(byte){return ('0' + (byte & 0xFF).toString(16)).slice(-2);}).join('')",
 	}
 )
 
