@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,12 +19,8 @@ import (
 )
 
 var (
-	decFolder    = ""
-	decName      = ""
-	UIProgress   *widget.ProgressBar
-	progressStep float64 = 0.0
-	s5Proxy              = ""
-	JSConsole            = []string{
+	UIProgress *widget.ProgressBar
+	JSConsole  []string = []string{
 		"var n = t.data",
 		"Array.from(t.data.iyt, function(byte){return ('0' + (byte & 0xFF).toString(16)).slice(-2);}).join('')",
 	}
@@ -36,85 +32,106 @@ type AbemaTVBasic struct {
 	Key         string
 	Output      string
 	iv          string
-	m3u8Host    string
-	videoHost   string
-	videos      []interface{}
+	progress    float64
 }
 
-var AbemaTV *AbemaTVBasic
+// LocalPath 自动判断根目录路径
+func LocalPath(subPath string) (string, error) {
+	// go build 可执行文件路径
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	runPath, err := filepath.EvalSymlinks(filepath.Dir(exePath))
+	if err != nil {
+		return "", err
+	}
+	// go run 调试路径
+	buildPath, err := filepath.EvalSymlinks(os.Getenv("GOTMPDIR"))
+	if err != nil {
+		return "", err
+	}
 
-func init() {
-	AbemaTV = new(AbemaTVBasic)
+	if strings.Contains(runPath, buildPath) {
+		var absPath string
+		// 获取当前文件 config.go 的路径
+		_, filename, _, ok := runtime.Caller(0)
+		if ok {
+			// 获取上上级目录 即根目录
+			absPath = filepath.Dir(filepath.Dir(filename))
+		}
+		absPath = filepath.Join(absPath, subPath)
+		return absPath, nil
+	}
+	runPath = filepath.Join(runPath, subPath)
+	return runPath, nil
 }
 
-// IPCheck 检查IP
-func (atv *AbemaTVBasic) URLCheck(url string) bool {
+// AbemaURLCheck 检查URL
+func AbemaURLCheck(url string) bool {
 	urlRule := regexp.MustCompile(`https?://.*abematv.*`)
 	result := urlRule.MatchString(url)
 	return result
 }
 
-// IPCheck 检查IP
-func (atv *AbemaTVBasic) IPCheck(url string) bool {
-	defer func() {
-		if e := recover(); e != nil {
-			return
-		}
-	}()
-	headers := utils.MiniHeaders{
-		"User-Agent": utils.UserAgent,
+// AbemaIPCheck 检查IP
+func AbemaIPCheck(url string) (bool, error) {
+	headers := utils.MiniHeaders{"User-Agent": utils.UserAgent}
+	res, err := utils.Minireq.Get(url, headers)
+	if err != nil {
+		return false, err
 	}
-	if s5Proxy != "" {
-		utils.Minireq.Proxy(s5Proxy)
-	}
-	res := utils.Minireq.Get(url, headers)
-	return res.RawRes.StatusCode == 200
+	return res.Response.StatusCode == 200, nil
 }
 
 // fetchData 获取远程数据
-func (atv *AbemaTVBasic) fetchData(url string) (data string) {
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println(err)
-			return
-		}
-	}()
-	headers := utils.MiniHeaders{
-		"User-Agent": utils.UserAgent,
+func (atv *AbemaTVBasic) fetchData(url string) ([]byte, error) {
+	headers := utils.MiniHeaders{"User-Agent": utils.UserAgent}
+	res, err := utils.Minireq.Get(url, headers)
+	if err != nil {
+		return nil, err
 	}
-	if s5Proxy != "" {
-		utils.Minireq.Proxy(s5Proxy)
+	rawData, err := res.RawData()
+	if err != nil {
+		return nil, err
 	}
-	res := utils.Minireq.Get(url, headers)
-	data = string(res.RawData())
-	return
+	return rawData, nil
 }
 
 // setM3U8Host 设置 M3U8 的地址
-func (atv *AbemaTVBasic) setM3U8Host() {
-	atv.m3u8Host = strings.Split(atv.PlaylistURL, "playlist.m3u8")[0]
+func (atv *AbemaTVBasic) setM3U8Host() string {
+	m3u8Host := strings.Split(atv.PlaylistURL, "playlist.m3u8")
+	if len(m3u8Host) != 0 {
+		return m3u8Host[0]
+	}
+	return ""
 }
 
 // setVideoHost 设置 Video 的地址
-func (atv *AbemaTVBasic) setVideoHost() {
-	atv.videoHost = strings.Split(atv.PlaylistURL, "program")[0]
+func (atv *AbemaTVBasic) setVideoHost() string {
+	videoHost := strings.Split(atv.PlaylistURL, "program")
+	if len(videoHost) != 0 {
+		return videoHost[0]
+	}
+	return ""
 }
 
 // hexStr 转换 key 和 iv 为16进制
-func (atv *AbemaTVBasic) hexStr(s string) []byte {
+func (atv *AbemaTVBasic) hexStr(s string) ([]byte, error) {
 	data, err := hex.DecodeString(s)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return data
+	return data, nil
 }
 
-// SetProxy 使用代理下载
+// SetProxy 设置 Socks5
 func (atv *AbemaTVBasic) SetProxy(proxy string) {
-	s5Proxy = proxy
+	utils.Minireq.Socks5Address = proxy
 }
 
 // rexFilterData 使用正则过滤数据
+//
 //	mode:
 //	1: FindAllString 全匹配
 //	2: FindAllStringSubmatch 精确匹配
@@ -140,139 +157,160 @@ func (atv *AbemaTVBasic) rexFilterData(rule string, data string, mode int) []str
 }
 
 // dlcore 下载函数
-func (atv *AbemaTVBasic) dlcore(u interface{}) interface{} {
+func (atv *AbemaTVBasic) dlcore(u interface{}) (interface{}, error) {
 	url := u.(string)
 	urlInfo := strings.Split(url, "#")
 	urlNew := urlInfo[0]
 	urlCode := urlInfo[1]
-	savepath := filepath.Join(decFolder, urlCode+"_dec.ts")
+	savepath := filepath.Join(atv.Output, urlCode+"_dec.ts")
 
-	fmt.Println("Download: ", urlNew)
-	request := utils.NewHTTP(s5Proxy)
-	res := request.Get(urlNew)
+	headers := utils.MiniHeaders{"User-Agent": utils.UserAgent}
+	res, err := utils.Minireq.Get(urlNew, headers)
+	if err != nil {
+		return nil, err
+	}
 
-	rawData := res.RawData()
-	hexKey := atv.hexStr(atv.Key)
-	kexIV := atv.hexStr(atv.iv)
+	rawData, err := res.RawData()
+	if err != nil {
+		return nil, err
+	}
+	hexKey, err := atv.hexStr(atv.Key)
+	if err != nil {
+		return nil, err
+	}
+	hexIV, err := atv.hexStr(atv.iv)
+	if err != nil {
+		return nil, err
+	}
 
-	decData := utils.AESSuite.Decrypt(rawData, hexKey, kexIV)
+	decData, err := utils.AESSuite.Decrypt(rawData, hexKey, hexIV)
+	if err != nil {
+		return nil, err
+	}
 
 	dst, err := os.Create(savepath)
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
 	}
-
-	io.Copy(dst, bytes.NewReader(decData))
 	defer dst.Close()
 
-	files, _ := ioutil.ReadDir(decFolder)
-	UIProgress.SetValue(progressStep * float64(len(files)))
+	_, err = io.Copy(dst, bytes.NewReader(decData))
+	if err != nil {
+		return nil, err
+	}
+
+	files, err := os.ReadDir(atv.Output)
+	if err != nil {
+		return nil, err
+	}
+	UIProgress.SetValue(atv.progress * float64(len(files)))
 
 	time.Sleep(time.Second * 3)
-	return nil
+	return "", nil
 }
 
 // BestM3U8URL 获取最佳分辨率的 URL
-func (atv *AbemaTVBasic) BestM3U8URL() (m3u8URL string) {
-	// data := string(utils.FileSuite.Read("demo/playlist.txt"))
-	data := atv.fetchData(atv.PlaylistURL)
-
-	if data != "" {
-		m3u8List := atv.rexFilterData(`(?m)^[\d]+.*`, data, 1)
-		videoDataList := atv.rexFilterData(`(?m)^#EXT-X-STREAM-INF.*`, data, 1)
-
-		bestmatch := 0
-		bandwidthMax := 0
-		for bindex, videoData := range videoDataList {
-			bandwidthDataSplit := strings.Split(videoData, ",")
-			bandwidthData := bandwidthDataSplit[1]
-			bandwidthKVSplit := strings.Split(bandwidthData, "=")
-			bandwidthStr := bandwidthKVSplit[1]
-			bandwidth, _ := strconv.Atoi(bandwidthStr)
-			if bandwidth > bandwidthMax {
-				bestmatch = bindex
-			}
-		}
-		m3u8URL = m3u8List[bestmatch]
+func (atv *AbemaTVBasic) BestM3U8URL() (string, error) {
+	// data, err := utils.FileSuite.Read("demo/playlist.txt")
+	// if err != nil {
+	// 	return "", err
+	// }
+	data, err := atv.fetchData(atv.PlaylistURL)
+	if err != nil {
+		return "", err
 	}
-	return
+
+	videoDataList := atv.rexFilterData(`(?m)^#EXT-X-STREAM-INF.*`, string(data), 1)
+	bestmatch := 0
+	bandwidthMax := 0
+	for bindex, videoData := range videoDataList {
+		bandwidthDataSplit := strings.Split(videoData, ",")
+		bandwidthData := bandwidthDataSplit[1]
+		bandwidthKVSplit := strings.Split(bandwidthData, "=")
+		bandwidthStr := bandwidthKVSplit[1]
+		bandwidth, err := strconv.Atoi(bandwidthStr)
+		if err != nil {
+			return "", err
+		}
+		if bandwidth > bandwidthMax {
+			bestmatch = bindex
+		}
+	}
+
+	m3u8List := atv.rexFilterData(`(?m)^[\d]+.*`, string(data), 1)
+	m3u8URL := m3u8List[bestmatch]
+	return m3u8URL, nil
 }
 
 // GetVideoInfo 获取视频信息
-func (atv *AbemaTVBasic) GetVideoInfo(m3u8URL string) []interface{} {
-	atv.videos = []interface{}{}
-	// 视频列表的
-	atv.setM3U8Host()
-	m3u8URL = atv.m3u8Host + m3u8URL
+func (atv *AbemaTVBasic) GetVideoInfo(m3u8URL string) ([]string, error) {
+	m3u8Host := atv.setM3U8Host()
+	m3u8URL = m3u8Host + m3u8URL
 
-	// 视频下载地址的 HOST
-	atv.setVideoHost()
-	videoHost := atv.videoHost
-	// 移除末尾的"/"
+	videoHost := atv.setVideoHost()
 	videoHost = videoHost[0 : len(videoHost)-1]
 
-	// data := string(utils.FileSuite.Read("demo/m3u8.txt"))
-	data := atv.fetchData(m3u8URL)
+	// data, err := utils.FileSuite.Read("demo/m3u8.txt")
+	// if err != nil {
+	// 	return nil, err
+	// }
+	data, err := atv.fetchData(m3u8URL)
+	if err != nil {
+		return nil, err
+	}
 
-	ivData := atv.rexFilterData(`(?m)IV=0x([\w]+)`, data, 2)
+	ivData := atv.rexFilterData(`(?m)IV=0x([\w]+)`, string(data), 2)
 	atv.iv = ivData[1]
 
-	vData := atv.rexFilterData(`(?m)^[^#].*`, data, 1)
+	var videos []string
+	vData := atv.rexFilterData(`(?m)^[^#].*`, string(data), 1)
 	for i, v := range vData {
 		video := fmt.Sprintf("%s%s#%04d", videoHost, v, i)
-		atv.videos = append(atv.videos, video)
+		videos = append(videos, video)
 	}
-	return atv.videos
+	return videos, nil
 }
 
 // Merge 合并视频
-func (atv *AbemaTVBasic) Merge() {
-	outputVideo := decName + "_all.ts"
-	decVideoList, _ := ioutil.ReadDir(decFolder)
-	fileAll, _ := os.OpenFile(outputVideo, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
-	for _, video := range decVideoList {
-		videoPath := filepath.Join(decFolder, video.Name())
-		videoFile, _ := os.Open(videoPath)
-		videoBytes, _ := ioutil.ReadAll(videoFile)
-		fileAll.Write(videoBytes)
+func (atv *AbemaTVBasic) Merge() error {
+	output := atv.Output
+	mergeName := fmt.Sprintf("%s_all.ts", filepath.Base(output))
+	mergePath := filepath.Join(filepath.Dir(output), mergeName)
+
+	decVideoList, err := os.ReadDir(output)
+	if err != nil {
+		return err
 	}
-	defer fileAll.Close()
-	atv.Output = outputVideo
+	mergeData, err := os.OpenFile(mergePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer mergeData.Close()
+
+	if err != nil {
+		return err
+	}
+	for _, video := range decVideoList {
+		videoPath := filepath.Join(output, video.Name())
+		videoFile, err := os.Open(videoPath)
+		if err != nil {
+			return err
+		}
+		videoBytes, err := io.ReadAll(videoFile)
+		if err != nil {
+			return err
+		}
+		_, err = mergeData.Write(videoBytes)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DownloadCore 下载视频
-func (atv *AbemaTVBasic) DownloadCore(videos []interface{}, thread int) {
-	// 视频保存目录
-	now := time.Now().Format("20060102150405")
-	decName = "decrypt_" + now
-	decFolder = filepath.Join(utils.FileSuite.LocalPath(true), decName)
-	utils.FileSuite.Create(decFolder)
-	// 下载视频
-	progressStep = 0.8 / float64(len(videos))
-	utils.TaskBoard(atv.dlcore, videos, thread)
-}
-
-// AtvDL 调用主函数
-func AtvDL(playlistURL, key, proxy string) {
-	if AbemaTV.IPCheck(playlistURL) {
-		AbemaTV.PlaylistURL = playlistURL
-		AbemaTV.Key = key
-		AbemaTV.SetProxy(proxy)
-
-		fmt.Println("[1] Get Best Playlist...")
-		bestURL := AbemaTV.BestM3U8URL()
-		fmt.Printf("  - [URL] %s\n", bestURL)
-
-		fmt.Println("[2] Get Video List...")
-		videos := AbemaTV.GetVideoInfo(bestURL)
-		fmt.Printf("  [Video] %d\n", len(videos))
-
-		fmt.Println("[3] Downloading...")
-		AbemaTV.DownloadCore(videos, 8)
-
-		fmt.Println("[4] Merging...")
-		AbemaTV.Merge()
-	} else {
-		fmt.Println("Please Set Proxy")
-	}
+func (atv *AbemaTVBasic) DownloadCore(videos []string, thread int) error {
+	atv.progress = 0.8 / float64(len(videos))
+	_, err := utils.TaskBoard(atv.dlcore, videos, thread)
+	return err
 }

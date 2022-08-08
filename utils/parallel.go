@@ -5,10 +5,11 @@ import (
 )
 
 // TaskConfig 任务配置
+//
 //	Control 控制状态 Add() Done() Wait()
 //	Mutex 线程安全锁 Lock() Unlock()
 //	Workers 线程数
-//  Results 任务执行结果
+//	Results 任务执行结果
 //	Counts 任务总数
 type TaskConfig struct {
 	Control sync.WaitGroup
@@ -19,11 +20,12 @@ type TaskConfig struct {
 }
 
 // TaskBoard 任务公告栏
+//
 //	runner 执行任务的函数
 //	tasks 任务列表
 //	worker 处理任务的线程数
-func TaskBoard(runner func(task interface{}) interface{}, tasks []interface{}, workers int) (data []interface{}) {
-	data = make([]interface{}, 0)
+func TaskBoard(runner func(task interface{}) (interface{}, error), tasks []string, workers int) ([]interface{}, error) {
+	var data []interface{}
 
 	// 任务配置
 	taskCfg := new(TaskConfig)
@@ -43,7 +45,8 @@ func TaskBoard(runner func(task interface{}) interface{}, tasks []interface{}, w
 		go func() {
 			defer taskCfg.Control.Done()
 			// 执行任务
-			taskCfg.Results <- runner(task)
+			result, _ := runner(task)
+			taskCfg.Results <- result
 			<-taskCfg.Workers
 		}()
 	}
@@ -57,5 +60,5 @@ func TaskBoard(runner func(task interface{}) interface{}, tasks []interface{}, w
 	}()
 
 	taskCfg.Control.Wait()
-	return
+	return data, nil
 }

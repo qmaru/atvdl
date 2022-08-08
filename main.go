@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"atvdl/services"
 	"atvdl/theme"
@@ -38,19 +41,22 @@ func main() {
 	myApp := app.New()
 	myApp.SetIcon(theme.MyLogo())
 	myWin := myApp.NewWindow("AbemaTV")
-	myWin.Resize(fyne.NewSize(400, 320))
+	myWin.Resize(fyne.NewSize(800, 600))
 	myWin.SetFixedSize(true)
 	myWin.CenterOnScreen()
 
 	uiPlaylist := widget.NewEntry()
 	uiKey := widget.NewEntry()
 	uiProxy := widget.NewEntry()
+	uiOutput := widget.NewEntry()
 	uiHelp := widget.NewLabel("")
+	uiHelp.Wrapping = fyne.TextWrapBreak
 	services.UIProgress = widget.NewProgressBar()
 
 	uiPlaylist.SetPlaceHolder("Playlist")
 	uiKey.SetPlaceHolder("Key")
 	uiProxy.SetPlaceHolder("Socks5 Proxy")
+	uiOutput.SetPlaceHolder("Output (Default: ./)")
 
 	uiGetKey := widget.NewButton("Get Key", func() {
 		keyHelp(myWin)
@@ -61,49 +67,77 @@ func main() {
 		url := uiPlaylist.Text
 		key := uiKey.Text
 		proxy := uiProxy.Text
+		output := uiOutput.Text
 
 		if url != "" && key != "" {
 			uiDownload.DisableableWidget.Disable()
 			services.UIProgress.SetValue(0)
 
-			abema := services.AbemaTV
+			abema := new(services.AbemaTVBasic)
 
 			norURL := strings.TrimSuffix(url, "\r")
 			nonURL := strings.TrimSuffix(norURL, "\n")
-			clearURL := strings.TrimSpace(nonURL)
+			playlistURL := strings.TrimSpace(nonURL)
 
-			if abema.URLCheck(clearURL) {
+			if services.AbemaURLCheck(playlistURL) {
 				abema.SetProxy(proxy)
-				if len(key) == 32 && abema.IPCheck(clearURL) {
-					abema.PlaylistURL = strings.TrimSpace(clearURL)
-					abema.Key = key
+				ipValid, err := services.AbemaIPCheck(playlistURL)
+				if err != nil {
+					uiHelp.SetText(err.Error())
+				} else {
+					if len(key) == 32 && ipValid {
+						abema.PlaylistURL = playlistURL
+						abema.Key = key
 
-					uiHelp.SetText("[1] Get Best Playlist...")
-					bestURL := abema.BestM3U8URL()
-					if bestURL != "" {
-						uiHelp.SetText("[2] Get Video List...")
-						videos := abema.GetVideoInfo(bestURL)
+						uiHelp.SetText("[1] Get Best Playlist...")
+						bestURL, err := abema.BestM3U8URL()
+						if err != nil {
+							uiHelp.SetText(err.Error())
+						} else {
+							uiHelp.SetText("[2] Get Video List...")
+							videos, err := abema.GetVideoInfo(bestURL)
+							if err != nil {
+								uiHelp.SetText(err.Error())
+							} else {
+								dlInfo := fmt.Sprintf("[3] Downloading...(%d)", len(videos))
+								uiHelp.SetText(dlInfo)
 
-						dlInfo := fmt.Sprintf("[3] Downloading...(%d)", len(videos))
-						uiHelp.SetText(dlInfo)
-						abema.DownloadCore(videos, 8)
+								var output_root string
+								if output == "" {
+									localPath, _ := services.LocalPath("")
+									output_root = localPath
+								} else {
+									output_root = output
+								}
 
-						uiHelp.SetText("[4] Merging...")
-						abema.Merge()
-						services.UIProgress.SetValue(1)
+								output_folder := fmt.Sprintf("decrypt_%s", time.Now().Format("2006-01-02-15-04-05"))
+								output_dir := filepath.Join(output_root, output_folder)
+								os.Mkdir(output_dir, 0644)
 
-						uiHelp.SetText(abema.Output)
-						uiDownload.DisableableWidget.Enable()
+								abema.Output = output_dir
+								err = abema.DownloadCore(videos, 4)
+								if err != nil {
+									uiHelp.SetText(err.Error())
+								} else {
+									uiHelp.SetText("[4] Merging...")
+									err = abema.Merge()
+									if err != nil {
+										uiHelp.SetText(err.Error())
+									} else {
+										services.UIProgress.SetValue(1)
+										uiHelp.SetText(output_dir)
+										uiDownload.DisableableWidget.Enable()
+									}
+								}
+							}
+						}
 					} else {
 						uiDownload.DisableableWidget.Enable()
-						uiHelp.SetText("url error")
-					}
-				} else {
-					uiDownload.DisableableWidget.Enable()
-					if len(key) != 32 {
-						uiHelp.SetText("Key Error")
-					} else if !abema.IPCheck(clearURL) {
-						uiHelp.SetText("Proxy Error")
+						if len(key) != 32 {
+							uiHelp.SetText("Key length error")
+						} else if !ipValid {
+							uiHelp.SetText("Please set socks5 proxy")
+						}
 					}
 				}
 			} else {
@@ -121,6 +155,7 @@ func main() {
 		uiPlaylist,
 		uiGetKey,
 		uiKey,
+		uiOutput,
 		uiProxy,
 		services.UIProgress,
 		uiDownload,

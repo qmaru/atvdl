@@ -1,14 +1,14 @@
 package utils
 
 import (
-	"github.com/aobeom/minireq"
+	"github.com/qmaru/minireq/v2"
 )
 
 // UserAgent 全局 UA
-var UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Safari/537.36 Edg/90.0.818.49"
+var UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.134 Safari/537.36 Edg/103.0.1264.77"
 
 // Minireq 初始化
-var Minireq *minireq.MiniRequest
+var Minireq *minireq.HttpClient
 
 // MiniHeaders Headers
 type MiniHeaders = minireq.Headers
@@ -26,14 +26,5 @@ type MiniFormData = minireq.FormData
 type MiniAuth = minireq.Auth
 
 func init() {
-	Minireq = minireq.Requests()
-}
-
-// NewHTTP 创建一个HTTP Client
-func NewHTTP(proxy string) *minireq.MiniRequest {
-	request := minireq.Requests()
-	if proxy != "" {
-		request.Proxy(proxy)
-	}
-	return request
+	Minireq = minireq.NewClient()
 }
